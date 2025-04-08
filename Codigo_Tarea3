@@ -1,0 +1,44 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, when, to_date, date_format, desc
+
+# 1. Iniciar sesión de Spark
+spark = SparkSession.builder \
+    .appName("ProcesamientoDHY3") \
+    .config("spark.sql.shuffle.partitions", "4") \
+    .getOrCreate()
+
+# 2. Cargar datos 
+df = spark.read \
+    .option("header", "true") \
+    .option("inferSchema", "true") \
+    .csv("dhy3-732k.csv")  
+
+# 3. Limpieza y transformación
+df = df.withColumnRenamed("clase_bien", "tipo_vehiculo") \
+       .withColumnRenamed("fecha_hecho", "fecha") \
+       .withColumn("tipo_vehiculo", 
+                  when(col("tipo_vehiculo").contains("NO REPORTADO"), "NO REPORTADO")
+                  .otherwise(col("tipo_vehiculo"))) \
+       .withColumn("fecha_limpia", to_date(col("fecha"), "d/M/yyyy")) \
+       .filter(col("fecha_limpia").isNotNull()) \
+       .withColumn("anio_mes", date_format(col("fecha_limpia"), "yyyy-MM"))
+
+# 4. Análisis exploratorio (EDA)
+print("=== Resumen del Dataset ===")
+print(f"Total de registros válidos: {df.count()}")
+print("\nMuestra de datos:")
+df.select("departamento", "municipio", "tipo_vehiculo", "fecha_limpia").show(5)
+
+print("\nTop 5 departamentos con más registros:")
+df.groupBy("departamento").count().orderBy(desc("count")).show(5)
+
+print("\nTipos de vehículo más reportados:")
+df.groupBy("tipo_vehiculo").count().orderBy(desc("count")).show()
+
+# 5. Guardar resultados (en formato Parquet)
+output_path = "resultados/dhy3_procesado"
+df.write.mode("overwrite").parquet(output_path)
+print(f"\nDatos procesados guardados en: {output_path}")
+
+# 6. Cerrar sesión
+spark.stop()
